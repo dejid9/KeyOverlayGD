@@ -1,0 +1,14 @@
+{
+	"geode": "5.10.1",
+	"gd": {
+		"win": "*",
+		"android": "*",
+		"android32": "*",
+		"android64": "*"
+	},
+	"id": "dejid.key_overlay",
+	"name": "KeyOverlay",
+	"version": "1.0.0",
+	"developer": "dejid",
+	"description": "Enhanced port of Blondazz/KeyOverlay with streaming waterfall bars, custom keys, colors, opacity, drop shadows, and in-game settings GUI with live preview."
+}

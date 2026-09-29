@@ -1,0 +1,10 @@
+build/
+bin/
+*.geode
+*.dll
+*.so
+*.dylib
+*.pdb
+.cache/
+.vscode/
+.idea/
