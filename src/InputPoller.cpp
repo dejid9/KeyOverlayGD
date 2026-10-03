@@ -12,6 +12,8 @@ void InputPoller::start() {
 #ifndef GEODE_IS_WINDOWS
     return;
 #else
+    auto& cfg = OverlayConfig::get();
+    if (!cfg.enabled) return;
     if (m_running.load()) return;
     updateKeysFromConfig();
     m_running.store(true);
@@ -56,6 +58,11 @@ void InputPoller::updateKeysFromConfig() {
 
 void InputPoller::run() {
     while (m_running.load()) {
+        auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
         int rate = m_pollingRate.load();
         if (rate <= 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(30));

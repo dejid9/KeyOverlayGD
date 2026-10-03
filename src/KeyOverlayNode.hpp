@@ -57,7 +57,7 @@ public:
 
     void handleRawKey(int keyCode, bool down);
     void handleMouseButton(int button, bool down);
-    void handleGDAction(int action, bool down);
+    void handleGDAction(int action, bool down, int player = 1);
     void handlePlayerButton(PlayerButton button, bool down, bool isSecondPlayer = false);
     void releaseAllKeys();
     void syncHoldOnReset();

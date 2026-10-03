@@ -217,32 +217,31 @@ void KeyOverlayNode::updateLayout() {
 }
 
 void KeyOverlayNode::update(float dt) {
-    if (m_isPreview) return;
-
     auto& cfg = OverlayConfig::get();
     size_t keyCount = m_columns.size();
     if (keyCount == 0) return;
 
-    // High-frequency polling synchronization
-    if (cfg.pollingRate > 0) {
-        InputPoller::get().syncToOverlay(this);
-    }
-
-    // CPS tracking for GDAction keys or when polling is disabled
-    auto now = std::chrono::steady_clock::now();
-    auto cutoff = now - std::chrono::milliseconds(1000);
-    for (size_t i = 0; i < keyCount; ++i) {
-        auto& col = m_columns[i];
-        if (i < cfg.keys.size() && (cfg.keys[i].isGDAction || cfg.pollingRate <= 0)) {
-            col.clickTimestamps.erase(
-                std::remove_if(col.clickTimestamps.begin(), col.clickTimestamps.end(),
-                    [&](auto const& t) { return t < cutoff; }),
-                col.clickTimestamps.end()
-            );
-            cfg.keys[i].currentCPS = static_cast<int>(col.clickTimestamps.size());
-            updateCounterDisplay(i);
+    if (!m_isPreview) {
+        // High-frequency polling synchronization
+        if (cfg.pollingRate > 0) {
+            InputPoller::get().syncToOverlay(this);
         }
-    }
+
+        // CPS tracking for GDAction keys or when polling is disabled
+        auto now = std::chrono::steady_clock::now();
+        auto cutoff = now - std::chrono::milliseconds(1000);
+        for (size_t i = 0; i < keyCount; ++i) {
+            auto& col = m_columns[i];
+            if (i < cfg.keys.size() && (cfg.keys[i].isGDAction || cfg.pollingRate <= 0)) {
+                col.clickTimestamps.erase(
+                    std::remove_if(col.clickTimestamps.begin(), col.clickTimestamps.end(),
+                        [&](auto const& t) { return t < cutoff; }),
+                    col.clickTimestamps.end()
+                );
+                cfg.keys[i].currentCPS = static_cast<int>(col.clickTimestamps.size());
+                updateCounterDisplay(i);
+            }
+        }
 
 #ifdef GEODE_IS_WINDOWS
     if (cfg.pollingRate <= 0) {
@@ -294,6 +293,23 @@ void KeyOverlayNode::update(float dt) {
         }
     }
 #endif
+    } else {
+        // Preview mode: update CPS display for preview clicks
+        auto now = std::chrono::steady_clock::now();
+        auto cutoff = now - std::chrono::milliseconds(1000);
+        for (size_t i = 0; i < keyCount; ++i) {
+            auto& col = m_columns[i];
+            col.clickTimestamps.erase(
+                std::remove_if(col.clickTimestamps.begin(), col.clickTimestamps.end(),
+                    [&](auto const& t) { return t < cutoff; }),
+                col.clickTimestamps.end()
+            );
+            if (i < cfg.keys.size()) {
+                cfg.keys[i].currentCPS = static_cast<int>(col.clickTimestamps.size());
+            }
+            updateCounterDisplay(i);
+        }
+    }
 
     // Optional Overlay Render FPS limiter (0 = Uncapped)
     if (cfg.overlayFPS > 0.0f) {
@@ -752,11 +768,11 @@ void KeyOverlayNode::handleMouseButton(int button, bool down) {
     }
 }
 
-void KeyOverlayNode::handleGDAction(int action, bool down) {
+void KeyOverlayNode::handleGDAction(int action, bool down, int player) {
     auto& cfg = OverlayConfig::get();
     for (size_t i = 0; i < cfg.keys.size(); ++i) {
         auto const& k = cfg.keys[i];
-        if (k.isGDAction && k.gdButton == action && k.gdPlayer == 1) {
+        if (k.isGDAction && k.gdButton == action && k.gdPlayer == player) {
             setKeyPressed(i, down);
         }
     }

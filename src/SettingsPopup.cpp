@@ -307,14 +307,39 @@ bool SettingsPopup::init(float width, float height) {
     m_previewBg->setPosition({ winSize.width - 85.0f, winSize.height * 0.5f - 12.0f });
     m_mainLayer->addChild(m_previewBg);
 
+    // Master switch in header (above preview)
+    auto masterMenu = CCMenu::create();
+    masterMenu->setPosition({ winSize.width - 85.0f, winSize.height - 20.0f });
+    m_mainLayer->addChild(masterMenu);
+
+    auto masterLabel = CCLabelBMFont::create("Mod Active", "bigFont.fnt");
+    masterLabel->setScale(0.24f);
+    masterLabel->setPosition({ -24.0f, 0.0f });
+    masterMenu->addChild(masterLabel);
+
+    m_masterToggler = CCMenuItemToggler::createWithStandardSprites(this, menu_selector(SettingsPopup::onToggle), 0.5f);
+    m_masterToggler->setTag(300);
+    m_masterToggler->toggle(OverlayConfig::get().enabled);
+    m_masterToggler->setPosition({ 36.0f, 0.0f });
+    masterMenu->addChild(m_masterToggler);
+
     auto previewTitle = CCLabelBMFont::create("Live Preview", "goldFont.fnt");
     previewTitle->setScale(0.48f);
     previewTitle->setPosition({ m_previewBg->getPositionX(), m_previewBg->getPositionY() + 96.0f });
     m_mainLayer->addChild(previewTitle);
 
+    // Disabled overlay label
+    m_disabledLabel = CCLabelBMFont::create("MOD DISABLED\n(0 overhead)", "goldFont.fnt", 120.0f, CCTextAlignment::kCCTextAlignmentCenter);
+    m_disabledLabel->setScale(0.42f);
+    m_disabledLabel->setPosition({ m_previewBg->getContentSize().width * 0.5f, m_previewBg->getContentSize().height * 0.5f });
+    m_disabledLabel->setColor(ccc3(255, 90, 90));
+    m_disabledLabel->setVisible(!OverlayConfig::get().enabled);
+    m_previewBg->addChild(m_disabledLabel);
+
     // Live KeyOverlayNode inside preview box
     m_previewNode = KeyOverlayNode::create(true);
     m_previewNode->setScale(0.68f);
+    m_previewNode->setVisible(OverlayConfig::get().enabled);
     m_mainLayer->addChild(m_previewNode);
 
     // Preview Background Color Switcher buttons right under preview title
@@ -909,6 +934,30 @@ void SettingsPopup::onToggle(CCObject* sender) {
         case 101: cfg.showCounters = on; break;
         case 102: cfg.scrollUpwards = on; break;
         case 103: cfg.resetCounterOnAttempt = on; break;
+        case 300: {
+            cfg.enabled = on;
+            if (cfg.enabled) {
+                InputPoller::get().start();
+            } else {
+                InputPoller::get().stop();
+            }
+            if (auto overlay = KeyOverlayNode::getActive()) {
+                overlay->setVisible(cfg.enabled);
+            }
+            if (m_masterToggler) {
+                m_masterToggler->toggle(cfg.enabled);
+            }
+            if (m_disabledLabel) {
+                m_disabledLabel->setVisible(!cfg.enabled);
+            }
+            if (m_previewNode) {
+                m_previewNode->setVisible(cfg.enabled);
+            }
+            if (m_currentTab == 4) {
+                setupEngineTab();
+            }
+            break;
+        }
         case 305: cfg.shadowEnabled = on; break;
         case 307: cfg.showContainerBg = on; break;
         case 308: cfg.fastBarShadow = on; break;
@@ -1223,7 +1272,61 @@ bool SettingsPopup::ccTouchBegan(CCTouch* touch, CCEvent* event) {
         updatePreview();
         return true;
     }
+
+    if (m_previewBg && m_previewNode && OverlayConfig::get().enabled) {
+        CCPoint localToBg = m_previewBg->convertToNodeSpace(touch->getLocation());
+        CCRect bgRect = { 0, 0, m_previewBg->getContentSize().width, m_previewBg->getContentSize().height };
+        if (bgRect.containsPoint(localToBg) && localToBg.y < 165.0f) {
+            CCPoint localToNode = m_previewNode->convertToNodeSpace(touch->getLocation());
+            auto const& keys = OverlayConfig::get().keys;
+            float totalW = m_previewNode->getTotalWidth();
+            int hitIndex = -1;
+
+            auto const& cfg = OverlayConfig::get();
+            float curX = 0.0f;
+            for (size_t i = 0; i < keys.size(); ++i) {
+                CCRect keyRect = { curX - 4.0f, -10.0f, cfg.keyWidth + 8.0f, cfg.keyHeight + 30.0f };
+                if (keyRect.containsPoint(localToNode)) {
+                    hitIndex = static_cast<int>(i);
+                    break;
+                }
+                curX += cfg.keyWidth + (keys.size() > 1 ? cfg.keySpacing : 0.0f);
+            }
+
+            if (hitIndex == -1 && !keys.empty()) {
+                float relX = localToNode.x / std::max(1.0f, totalW);
+                hitIndex = std::clamp(static_cast<int>(relX * keys.size()), 0, static_cast<int>(keys.size()) - 1);
+            }
+
+            if (hitIndex >= 0 && hitIndex < static_cast<int>(keys.size())) {
+                m_previewPressedKeyIndex = hitIndex;
+                m_previewNode->setKeyPressed(hitIndex, true);
+                return true;
+            }
+        }
+    }
+
     return Popup::ccTouchBegan(touch, event);
+}
+
+void SettingsPopup::ccTouchEnded(CCTouch* touch, CCEvent* event) {
+    if (m_previewPressedKeyIndex >= 0) {
+        if (m_previewNode) {
+            m_previewNode->setKeyPressed(m_previewPressedKeyIndex, false);
+        }
+        m_previewPressedKeyIndex = -1;
+    }
+    Popup::ccTouchEnded(touch, event);
+}
+
+void SettingsPopup::ccTouchCancelled(CCTouch* touch, CCEvent* event) {
+    if (m_previewPressedKeyIndex >= 0) {
+        if (m_previewNode) {
+            m_previewNode->setKeyPressed(m_previewPressedKeyIndex, false);
+        }
+        m_previewPressedKeyIndex = -1;
+    }
+    Popup::ccTouchCancelled(touch, event);
 }
 
 void SettingsPopup::handleKeyInput(int keyCode, bool down) {
@@ -1250,18 +1353,35 @@ void SettingsPopup::handleKeyInput(int keyCode, bool down) {
         return;
     }
 
-    if (m_previewNode) {
+    if (m_previewNode && OverlayConfig::get().enabled) {
+        if (keyCode == KEY_Space || keyCode == KEY_Up) {
+            m_previewNode->handleGDAction(1, down, 1);
+        } else if (keyCode == KEY_W) {
+            m_previewNode->handleGDAction(1, down, 2);
+        } else if (keyCode == KEY_Left || keyCode == KEY_A) {
+            m_previewNode->handleGDAction(2, down, 1);
+        } else if (keyCode == KEY_Right || keyCode == KEY_D) {
+            m_previewNode->handleGDAction(3, down, 1);
+        }
         m_previewNode->handleRawKey(keyCode, down);
     }
 }
 
 void SettingsPopup::onSave(CCObject* sender) {
     auto& cfg = OverlayConfig::get();
-    InputPoller::get().setPollingRate(cfg.pollingRate);
-    InputPoller::get().updateKeysFromConfig();
+    if (cfg.enabled) {
+        InputPoller::get().setPollingRate(cfg.pollingRate);
+        InputPoller::get().updateKeysFromConfig();
+        InputPoller::get().start();
+    } else {
+        InputPoller::get().stop();
+    }
     cfg.save();
     if (auto overlay = KeyOverlayNode::getActive()) {
-        overlay->updateLayout();
+        overlay->setVisible(cfg.enabled);
+        if (cfg.enabled) {
+            overlay->updateLayout();
+        }
     }
     FLAlertLayer::create("Saved", "KeyOverlay settings saved successfully!", "OK")->show();
 }
@@ -1274,23 +1394,26 @@ void SettingsPopup::setupEngineTab() {
     menu->setPosition({ 0, 0 });
     m_tabContent->addChild(menu);
 
-    auto title = CCLabelBMFont::create("Performance & Smoothness", "goldFont.fnt");
-    title->setScale(0.42f);
+    auto title = CCLabelBMFont::create("Engine & Performance", "goldFont.fnt");
+    title->setScale(0.40f);
     title->setAnchorPoint({ 0.0f, 0.5f });
-    title->setPosition({ 10.0f, 188.0f });
+    title->setPosition({ 8.0f, 190.0f });
     m_tabContent->addChild(title);
 
+    // Master Switch toggle row
+    createToggleRow(m_tabContent, { 8.0f, 168.0f }, "Enable Mod (Master Switch)", cfg.enabled, 300, menu_selector(SettingsPopup::onToggle), 162.0f);
+
     // 1. Overlay FPS Slider & TextInput (tag 501)
-    createFloatInputRow(m_tabContent, { 8.0f, 162.0f }, "Overlay FPS", cfg.overlayFPS, 0.0f, 360.0f, 501);
+    createFloatInputRow(m_tabContent, { 8.0f, 142.0f }, "Overlay FPS", cfg.overlayFPS, 0.0f, 360.0f, 501);
 
     // FPS Presets
     auto fpsMenu = CCMenu::create();
-    fpsMenu->setPosition({ 148.0f, 140.0f });
+    fpsMenu->setPosition({ 148.0f, 122.0f });
     m_tabContent->addChild(fpsMenu);
 
     auto makeFpsBtn = [&](char const* text, int fps) {
         auto spr = ButtonSprite::create(text, "goldFont.fnt", (static_cast<int>(cfg.overlayFPS) == fps) ? "GJ_button_01.png" : "GJ_button_04.png", 0.5f);
-        spr->setScale(0.36f);
+        spr->setScale(0.34f);
         auto btn = CCMenuItemSpriteExtra::create(spr, this, menu_selector(SettingsPopup::onPresetFPS));
         btn->setTag(fps);
         fpsMenu->addChild(btn);
@@ -1303,16 +1426,16 @@ void SettingsPopup::setupEngineTab() {
     fpsMenu->setLayout(RowLayout::create()->setGap(3.0f));
 
     // 2. Click Polling Rate Slider & TextInput (tag 502)
-    createFloatInputRow(m_tabContent, { 8.0f, 110.0f }, "Poll Rate Hz", static_cast<float>(cfg.pollingRate), 0.0f, 2000.0f, 502);
+    createFloatInputRow(m_tabContent, { 8.0f, 96.0f }, "Poll Rate Hz", static_cast<float>(cfg.pollingRate), 0.0f, 2000.0f, 502);
 
     // Polling Presets
     auto pollMenu = CCMenu::create();
-    pollMenu->setPosition({ 148.0f, 88.0f });
+    pollMenu->setPosition({ 148.0f, 76.0f });
     m_tabContent->addChild(pollMenu);
 
     auto makePollBtn = [&](char const* text, int hz) {
         auto spr = ButtonSprite::create(text, "goldFont.fnt", (cfg.pollingRate == hz) ? "GJ_button_01.png" : "GJ_button_04.png", 0.5f);
-        spr->setScale(0.36f);
+        spr->setScale(0.34f);
         auto btn = CCMenuItemSpriteExtra::create(spr, this, menu_selector(SettingsPopup::onPresetPolling));
         btn->setTag(hz);
         pollMenu->addChild(btn);
@@ -1328,7 +1451,7 @@ void SettingsPopup::setupEngineTab() {
     auto modeLabel = CCLabelBMFont::create("Counter Display:", "bigFont.fnt");
     modeLabel->setScale(0.24f);
     modeLabel->setAnchorPoint({ 0.0f, 0.5f });
-    modeLabel->setPosition({ 8.0f, 54.0f });
+    modeLabel->setPosition({ 8.0f, 48.0f });
     m_tabContent->addChild(modeLabel);
 
     char const* modeText = "Total Clicks";
@@ -1336,14 +1459,14 @@ void SettingsPopup::setupEngineTab() {
     else if (cfg.counterMode == 2) modeText = "CPS | Total";
 
     auto modeSpr = ButtonSprite::create(modeText, "goldFont.fnt", "GJ_button_05.png", 0.65f);
-    modeSpr->setScale(0.48f);
+    modeSpr->setScale(0.44f);
     auto modeBtn = CCMenuItemSpriteExtra::create(modeSpr, this, menu_selector(SettingsPopup::onCycleCounterMode));
-    modeBtn->setPosition({ 190.0f, 54.0f });
+    modeBtn->setPosition({ 190.0f, 48.0f });
     menu->addChild(modeBtn);
 
     // 4. Fast Bar Shadow toggle & Reset / Attempt toggle
-    createToggleRow(m_tabContent, { 8.0f, 18.0f }, "Fast Bar Shadow", cfg.fastBarShadow, 308, menu_selector(SettingsPopup::onToggle), 88.0f);
-    createToggleRow(m_tabContent, { 170.0f, 18.0f }, "Reset / Attempt", cfg.resetCounterOnAttempt, 103, menu_selector(SettingsPopup::onToggle), 68.0f);
+    createToggleRow(m_tabContent, { 8.0f, 16.0f }, "Fast Bar Shadow", cfg.fastBarShadow, 308, menu_selector(SettingsPopup::onToggle), 88.0f);
+    createToggleRow(m_tabContent, { 170.0f, 16.0f }, "Reset / Attempt", cfg.resetCounterOnAttempt, 103, menu_selector(SettingsPopup::onToggle), 68.0f);
 }
 
 void SettingsPopup::onPresetFPS(CCObject* sender) {
@@ -1382,13 +1505,24 @@ void SettingsPopup::onClose(CCObject* sender) {
 }
 
 void SettingsPopup::updatePreview() {
+    auto& cfg = OverlayConfig::get();
+    if (m_masterToggler) {
+        m_masterToggler->toggle(cfg.enabled);
+    }
+    if (m_disabledLabel) {
+        m_disabledLabel->setVisible(!cfg.enabled);
+    }
     if (m_previewNode) {
+        m_previewNode->setVisible(cfg.enabled);
         m_previewNode->updateLayout();
         auto winSize = m_mainLayer->getContentSize();
         float previewCenterX = winSize.width - 85.0f;
         m_previewNode->setPosition({ previewCenterX - m_previewNode->getTotalWidth() * 0.68f * 0.5f, 44.0f });
     }
     if (auto overlay = KeyOverlayNode::getActive()) {
-        overlay->updateLayout();
+        overlay->setVisible(cfg.enabled);
+        if (cfg.enabled) {
+            overlay->updateLayout();
+        }
     }
 }

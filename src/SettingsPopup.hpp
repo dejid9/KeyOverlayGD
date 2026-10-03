@@ -19,6 +19,9 @@ protected:
     CCLayerColor* m_previewBg = nullptr;
     CCNode* m_tabContent = nullptr;
     CCMenu* m_tabButtonsMenu = nullptr;
+    CCMenuItemToggler* m_masterToggler = nullptr;
+    CCLabelBMFont* m_disabledLabel = nullptr;
+    int m_previewPressedKeyIndex = -1;
 
     int m_currentTab = 0;
     int m_listeningKeyIndex = -1;
@@ -61,6 +64,8 @@ protected:
     void onReset(CCObject* sender);
     void onClose(CCObject* sender) override;
     bool ccTouchBegan(CCTouch* touch, CCEvent* event) override;
+    void ccTouchEnded(CCTouch* touch, CCEvent* event) override;
+    void ccTouchCancelled(CCTouch* touch, CCEvent* event) override;
 
 public:
     static SettingsPopup* s_activeInstance;

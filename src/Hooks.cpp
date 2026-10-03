@@ -22,24 +22,31 @@ class $modify(KeyOverlayPlayLayer, PlayLayer) {
         PlayLayer::setupHasCompleted();
 
         auto& cfg = OverlayConfig::get();
-        if (cfg.enabled) {
-            if (this->m_uiLayer) {
-                if (auto old = this->m_uiLayer->getChildByID("key-overlay-node")) {
-                    old->removeFromParent();
-                }
-                auto overlay = KeyOverlayNode::create(false);
-                overlay->setID("key-overlay-node");
-                this->m_uiLayer->addChild(overlay, 100);
-                overlay->syncHoldOnReset();
-            } else {
-                if (auto old = this->getChildByID("key-overlay-node")) {
-                    old->removeFromParent();
-                }
-                auto overlay = KeyOverlayNode::create(false);
-                overlay->setID("key-overlay-node");
-                this->addChild(overlay, 100);
-                overlay->syncHoldOnReset();
+        if (!cfg.enabled) {
+            InputPoller::get().stop();
+            return;
+        }
+
+        if (this->m_uiLayer) {
+            if (auto old = this->m_uiLayer->getChildByID("key-overlay-node")) {
+                old->removeFromParent();
             }
+            auto overlay = KeyOverlayNode::create(false);
+            overlay->setID("key-overlay-node");
+            this->m_uiLayer->addChild(overlay, 100);
+            overlay->syncHoldOnReset();
+        } else {
+            if (auto old = this->getChildByID("key-overlay-node")) {
+                old->removeFromParent();
+            }
+            auto overlay = KeyOverlayNode::create(false);
+            overlay->setID("key-overlay-node");
+            this->addChild(overlay, 100);
+            overlay->syncHoldOnReset();
+        }
+
+        if (cfg.pollingRate > 0) {
+            InputPoller::get().start();
         }
         InputPoller::get().clearPendingClicks();
     }
@@ -48,6 +55,8 @@ class $modify(KeyOverlayPlayLayer, PlayLayer) {
         PlayLayer::resetLevel();
 
         auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) return;
+
         if (auto overlay = KeyOverlayNode::getActive()) {
             overlay->syncHoldOnReset();
             if (cfg.resetCounterOnAttempt) {
@@ -58,6 +67,10 @@ class $modify(KeyOverlayPlayLayer, PlayLayer) {
 
     void resume() {
         PlayLayer::resume();
+
+        auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) return;
+
         if (auto overlay = KeyOverlayNode::getActive()) {
             overlay->syncHoldOnReset();
         }
@@ -65,6 +78,10 @@ class $modify(KeyOverlayPlayLayer, PlayLayer) {
 
     void pauseGame(bool p0) {
         PlayLayer::pauseGame(p0);
+
+        auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) return;
+
         if (auto overlay = KeyOverlayNode::getActive()) {
             overlay->releaseAllKeys();
         }
@@ -83,16 +100,20 @@ class $modify(KeyOverlayPlayLayer, PlayLayer) {
 class $modify(KeyOverlayPlayerObject, PlayerObject) {
     bool pushButton(PlayerButton button) {
         auto result = PlayerObject::pushButton(button);
-        if (!isSettingsOpen()) {
-            if (auto overlay = KeyOverlayNode::getActive()) {
-                overlay->handlePlayerButton(button, true, this->m_isSecondPlayer);
-            }
+        auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled || isSettingsOpen()) return result;
+
+        if (auto overlay = KeyOverlayNode::getActive()) {
+            overlay->handlePlayerButton(button, true, this->m_isSecondPlayer);
         }
         return result;
     }
 
     bool releaseButton(PlayerButton button) {
         auto result = PlayerObject::releaseButton(button);
+        auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) return result;
+
         if (auto overlay = KeyOverlayNode::getActive()) {
             overlay->handlePlayerButton(button, false, this->m_isSecondPlayer);
         }
@@ -102,10 +123,14 @@ class $modify(KeyOverlayPlayerObject, PlayerObject) {
 
 class $modify(KeyOverlayUILayer, UILayer) {
     bool ccTouchBegan(CCTouch* touch, CCEvent* event) {
+        auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) {
+            return UILayer::ccTouchBegan(touch, event);
+        }
+
         if (touch) {
             TouchTracker::activeTouches.insert(touch->getID());
         }
-        auto& cfg = OverlayConfig::get();
 #ifdef GEODE_IS_WINDOWS
         if (cfg.pollingRate <= 0 && !isSettingsOpen())
 #else
@@ -120,10 +145,15 @@ class $modify(KeyOverlayUILayer, UILayer) {
     }
 
     void ccTouchEnded(CCTouch* touch, CCEvent* event) {
+        auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) {
+            UILayer::ccTouchEnded(touch, event);
+            return;
+        }
+
         if (touch) {
             TouchTracker::activeTouches.erase(touch->getID());
         }
-        auto& cfg = OverlayConfig::get();
 #ifdef GEODE_IS_WINDOWS
         if (cfg.pollingRate <= 0)
 #endif
@@ -138,10 +168,15 @@ class $modify(KeyOverlayUILayer, UILayer) {
     }
 
     void ccTouchCancelled(CCTouch* touch, CCEvent* event) {
+        auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) {
+            UILayer::ccTouchCancelled(touch, event);
+            return;
+        }
+
         if (touch) {
             TouchTracker::activeTouches.erase(touch->getID());
         }
-        auto& cfg = OverlayConfig::get();
 #ifdef GEODE_IS_WINDOWS
         if (cfg.pollingRate <= 0)
 #endif
@@ -164,9 +199,7 @@ class $modify(KeyOverlayPauseLayer, PauseLayer) {
             overlay->releaseAllKeys();
         }
 
-        auto& cfg = OverlayConfig::get();
-        if (!cfg.enabled) return;
-
+        // Always show the Keys settings button so the user can re-enable the mod!
         auto spr = ButtonSprite::create("Keys", "goldFont.fnt", "GJ_button_01.png", 0.7f);
         spr->setScale(0.6f);
 
@@ -211,8 +244,11 @@ class $modify(KeyOverlayKeyboardDispatcher, CCKeyboardDispatcher) {
             }
         }
 
-        // If in PlayLayer and overlay is active, route key event
         auto& cfg = OverlayConfig::get();
+        if (!cfg.enabled) {
+            return CCKeyboardDispatcher::dispatchKeyboardMSG(key, isKeyDown, isKeyRepeat, timestamp);
+        }
+
 #ifdef GEODE_IS_WINDOWS
         if (!isKeyRepeat && !isSettingsOpen() && cfg.pollingRate <= 0)
 #else
